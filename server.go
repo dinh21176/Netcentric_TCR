@@ -270,8 +270,8 @@ func updateTroops(room *Room) {
 		nextPos := t.position - 1
 		if nextPos < 0 {
 			// Check tower HP của lane hiện tại
-			hp := room.towerHP[2-t.player][t.lane]
-			if hp <= 0 {
+			hp := room.towerHP[3-t.player][t.lane]
+			if hp <= 0 && t.lane != "C" {
 				// Tower đã chết → kill troop gốc và spawn troop mới trên lane C
 				t.alive = false
 				newTroop := &Troop{
@@ -306,7 +306,7 @@ func updateTroops(room *Room) {
 		// 	continue
 		// }
 		// Tìm enemy troop tại vị trí kế tiếp
-		enemy := findEnemyTroopAt(room, t, 4-nextPos)  
+		enemy := findEnemyTroopAt(room, t, 4-t.position)  
 		if enemy != nil {
 			if enemy.troopType == t.troopType {
 				t.alive = false
@@ -353,7 +353,7 @@ func applyTowerDamage(room *Room) {
 			continue
 		}
 		if t.position == 0 {
-			enemy := 2 - t.player
+			enemy := 3 - t.player
 			hp := room.towerHP[enemy][t.lane]
 			if hp > 0 {
 				room.towerHP[enemy][t.lane] -= 5
@@ -388,7 +388,7 @@ func renderMap(room *Room) string {
 
 		symbol := fmt.Sprintf("%s%d", typeChar, t.player)
 
-		if t.player == 1 {
+		if t.player == 2 {
 			// Player 1: đi từ trái -> phải
 			lanes[t.lane][t.position] = symbol
 		} else {

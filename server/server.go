@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math/rand"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,20 +21,20 @@ type Client struct {
 }
 
 type Troop struct {
-	player     int    // 1 or 2
-	troopType  int    // 1 or 2
-	lane       string // "L", "C", "R"
-	position   int    // 0..4 position on lane (0 nearest tower, 4 furthest)
-	age        int    // for timing movement (move every 4 seconds)
-	alive      bool
+	player    int    // 1 or 2
+	troopType int    // 1 or 2
+	lane      string // "L", "C", "R"
+	position  int    // 0..4 position on lane (0 nearest tower, 4 furthest)
+	age       int    // for timing movement (move every 4 seconds)
+	alive     bool
 }
 
 type Room struct {
-	id          int
-	clients     [2]*Client
-	troops      []*Troop
-	towerHP     map[int]map[string]int // player -> lane -> hp
-	mu          sync.Mutex
+	id      int
+	clients [2]*Client
+	troops  []*Troop
+	towerHP map[int]map[string]int // player -> lane -> hp
+	mu      sync.Mutex
 }
 
 var (
@@ -112,10 +114,24 @@ func handleConnection(conn net.Conn) {
 
 	switch mode {
 	case "1":
-		go startBotGame(client)
+		conn.Write([]byte("Chọn độ khó:\n1. Dễ\n2. Vừa\n3. Khó\n"))
+		levelLine, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Read level error:", err)
+			return
+		}
+		levelLine = strings.TrimSpace(levelLine)
+		level, err := strconv.Atoi(levelLine)
+		if err != nil || level < 1 || level > 3 {
+			conn.Write([]byte("Level không hợp lệ. Ngắt kết nối.\n"))
+			return
+		}
+		go startBotGame(client, level)
+
 	case "2":
 		conn.Write([]byte("Waiting for another player...\n"))
 		waitingRoom <- client
+
 	default:
 		conn.Write([]byte("Invalid mode. Disconnecting.\n"))
 		return
@@ -123,17 +139,25 @@ func handleConnection(conn net.Conn) {
 
 	go listenClientInput(client)
 
-	// Keep connection alive
-	select {}
+	// Keep connection alive until client disconnects (detect error in listenClientInput)
+	// Here, block until input channel closed or connection closed
+	for {
+		select {
+		case <-time.After(10 * time.Minute):
+			conn.Write([]byte("Session timeout. Disconnecting.\n"))
+			return
+		}
+	}
 }
-func startBotGame(p1 *Client) {
+
+func startBotGame(p1 *Client, level int) {
 	globalMu.Lock()
 	roomCount++
 	roomID := roomCount
 	globalMu.Unlock()
 
 	bot := &Client{
-		username:  "Bot",
+		username:  fmt.Sprintf("BotLv%d", level),
 		clientKey: "Bot",
 		mana:      0,
 		inputCh:   make(chan string, 10),
@@ -152,12 +176,31 @@ func startBotGame(p1 *Client) {
 	bot.roomID = roomID
 	rooms[roomID] = room
 
-	// Giả lập bot hành động
 	go func() {
 		for {
-			time.Sleep(5 * time.Second)
+			var delay time.Duration
+			switch level {
+			case 1:
+				delay = 7 * time.Second
+			case 2:
+				delay = 4 * time.Second
+			case 3:
+				delay = 2 * time.Second
+			}
+			time.Sleep(delay)
 			if bot.mana >= 5 {
-				bot.inputCh <- "1" // ví dụ: luôn gọi troop loại 1 bên lane L
+				var command string
+				switch level {
+				case 1:
+					command = "1-L"
+				case 2:
+					command = "2-C"
+				case 3:
+					lanes := []string{"L", "C", "R"}
+					types := []string{"1", "2", "3"}
+					command = fmt.Sprintf("%s-%s", types[rand.Intn(len(types))], lanes[rand.Intn(len(lanes))])
+				}
+				bot.inputCh <- command
 			}
 		}
 	}()
@@ -165,13 +208,13 @@ func startBotGame(p1 *Client) {
 	go gameLoop(room)
 }
 
-
 func listenClientInput(client *Client) {
 	reader := bufio.NewReader(client.conn)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Println("Client disconnected:", client.clientKey)
+			close(client.inputCh)
 			return
 		}
 		line = strings.TrimSpace(line)
@@ -210,96 +253,100 @@ func gameLoop(room *Room) {
 	p1 := room.clients[0]
 	p2 := room.clients[1]
 
-	// Notify start game
 	startMsg := "Game started! Type number command to summon troops.\nCommands:\n1: 1-L\n2: 1-R\n3: 2-L\n4: 2-R\n"
-	p1.conn.Write([]byte(fmt.Sprintf("%s_%s", p1.clientKey, startMsg)))
-	p2.conn.Write([]byte(fmt.Sprintf("%s_%s", p2.clientKey, startMsg)))
+	if p1.conn != nil {
+		p1.conn.Write([]byte(fmt.Sprintf("%s\n", startMsg)))
+	}
+	if p2.conn != nil && p2 != p1 {
+		p2.conn.Write([]byte(fmt.Sprintf("%s\n", startMsg)))
+	}
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	// mana increase every second
-	go func() {
-		for range ticker.C {
-			room.mu.Lock()
-			p1.mana += 1
-			p2.mana += 1
-			room.mu.Unlock()
-		}
-	}()
-
 	for {
 		select {
-		case cmd := <-p1.inputCh:
-			handleCommand(room, 1, cmd)
-		case cmd := <-p2.inputCh:
-			handleCommand(room, 2, cmd)
+		case cmd, ok := <-p1.inputCh:
+			if !ok {
+				// client disconnected
+				if p2.conn != nil {
+					p2.conn.Write([]byte("Opponent disconnected. You win!\n"))
+				}
+				return
+			}
+			processCommand(room, 1, cmd)
+
+		case cmd, ok := <-p2.inputCh:
+			if !ok {
+				if p1.conn != nil {
+					p1.conn.Write([]byte("Opponent disconnected. You win!\n"))
+				}
+				return
+			}
+			processCommand(room, 2, cmd)
+
 		case <-ticker.C:
 			room.mu.Lock()
-			// update troop movement
+			// increase mana +1 per second
+			if p1.mana < 100 {
+				p1.mana += 1
+			}
+			if p2.mana < 100 {
+				p2.mana += 1
+			}
+
 			updateTroops(room)
-			// apply troop damage to towers if at position 0
 			applyTowerDamage(room)
-			// render and send map
 			mapStr := renderMap(room)
-			// send map + mana to clients
-			p1.conn.Write([]byte(fmt.Sprintf("%s_Mana: %d\n%s\n", p1.clientKey, p1.mana, mapStr)))
-			p2.conn.Write([]byte(fmt.Sprintf("%s_Mana: %d\n%s\n", p2.clientKey, p2.mana, mapStr)))
+			if p1.conn != nil {
+				p1.conn.Write([]byte(fmt.Sprintf("%s_Mana: %d\n%s\n", p1.clientKey, p1.mana, mapStr)))
+			}
+			if p2.conn != nil && p2 != p1 {
+				p2.conn.Write([]byte(fmt.Sprintf("%s_Mana: %d\n%s\n", p2.clientKey, p2.mana, mapStr)))
+			}
+
 			room.mu.Unlock()
 		}
 	}
 }
 
-func handleCommand(room *Room, player int, cmd string) {
+func processCommand(room *Room, player int, cmd string) {
 	room.mu.Lock()
 	defer room.mu.Unlock()
 
-	var client *Client
-	if player == 1 {
-		client = room.clients[0]
-	} else {
-		client = room.clients[1]
-	}
-
-	// Commands: "1", "2", "3", "4"
-	// map commands to troop summon: 1=1-L, 2=1-R, 3=2-L, 4=2-R
+	cmd = strings.ToUpper(cmd)
 	var troopType int
 	var lane string
+
 	switch cmd {
-	case "1":
+	case "1-L", "1-R":
 		troopType = 1
-		lane = "L"
-	case "2":
-		troopType = 1
-		lane = "R"
-	case "3":
+	case "2-L", "2-R":
 		troopType = 2
-		lane = "L"
-	case "4":
-		troopType = 2
-		lane = "R"
 	default:
-		client.conn.Write([]byte("Invalid command\n"))
 		return
 	}
+	parts := strings.Split(cmd, "-")
+	if len(parts) != 2 {
+		return
+	}
+	lane = parts[1]
 
-	// mana cost per troop 5 for type1, 8 for type2 (example)
-	cost := 0
-	if troopType == 1 {
-		cost = 5
+	// cost 5 mana
+	var c *Client
+	if player == 1 {
+		c = room.clients[0]
 	} else {
-		cost = 8
+		c = room.clients[1]
 	}
-
-	if client.mana < cost {
-		client.conn.Write([]byte("Not enough mana\n"))
+	if c.mana < 5 {
+		c.conn.Write([]byte("Not enough mana!\n"))
 		return
 	}
+	c.mana -= 5
 
-	client.mana -= cost
-
-	// spawn troop at position 4 (furthest from enemy tower)
-	troop := &Troop{
+	// add troop at position 4 (furthest)
+	newTroop := &Troop{
 		player:    player,
 		troopType: troopType,
 		lane:      lane,
@@ -307,9 +354,16 @@ func handleCommand(room *Room, player int, cmd string) {
 		age:       0,
 		alive:     true,
 	}
-	room.troops = append(room.troops, troop)
+	room.troops = append(room.troops, newTroop)
 }
-
+func findEnemyTroopAt(room *Room, troop *Troop, pos int) *Troop {
+	for _, t := range room.troops {
+		if t.alive && t.player != troop.player && t.lane == troop.lane && t.position == pos {
+			return t
+		}
+	}
+	return nil
+}
 func updateTroops(room *Room) {
 	var newTroops []*Troop
 
@@ -393,28 +447,32 @@ func updateTroops(room *Room) {
 }
 
 
-func findEnemyTroopAt(room *Room, troop *Troop, pos int) *Troop {
-	for _, t := range room.troops {
-		if t.alive && t.player != troop.player && t.lane == troop.lane && t.position == pos {
-			return t
-		}
-	}
-	return nil
-}
-
 func applyTowerDamage(room *Room) {
-	// troops at position 0 damage tower -5hp per second
 	for _, t := range room.troops {
 		if !t.alive {
 			continue
 		}
 		if t.position == 0 {
-			enemy := 3 - t.player
-			hp := room.towerHP[enemy][t.lane]
-			if hp > 0 {
-				room.towerHP[enemy][t.lane] -= 5
-				if room.towerHP[enemy][t.lane] < 0 {
-					room.towerHP[enemy][t.lane] = 0
+			enemyPlayer := 3 - t.player
+			room.towerHP[enemyPlayer][t.lane] -= 5
+			if room.towerHP[enemyPlayer][t.lane] <= 0 && t.lane != "C" {
+				room.towerHP[enemyPlayer][t.lane] = 0
+				// Game over
+				msg := fmt.Sprintf("Tower %s of Player %d destroyed. Troop of %d is going to king lane \n", t.lane, enemyPlayer, t.player,)
+				for _, c := range room.clients {
+					if c.conn != nil {
+						c.conn.Write([]byte(msg))
+					}
+				}
+			}
+			if room.towerHP[enemyPlayer][t.lane] <= 0 && t.lane == "C" {
+				room.towerHP[enemyPlayer][t.lane] = 0
+				// Game over
+				msg := fmt.Sprintf("King Tower of Player %d destroyed by troop of %d. \n", enemyPlayer, t.player)
+				for _, c := range room.clients {
+					if c.conn != nil {
+						c.conn.Write([]byte(msg))
+					}
 				}
 			}
 		}
@@ -482,4 +540,6 @@ func renderMap(room *Room) string {
 
 	return mapStr
 }
+
+
 

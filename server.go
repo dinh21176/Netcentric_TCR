@@ -69,6 +69,7 @@ func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
+	// Read auth
 	authLine, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Println("Read auth error:", err)
@@ -100,15 +101,70 @@ func handleConnection(conn net.Conn) {
 	clients[clientKey] = client
 	globalMu.Unlock()
 
-	conn.Write([]byte(fmt.Sprintf("%s_Authenticated. Waiting for another player...\n", clientKey)))
+	conn.Write([]byte(fmt.Sprintf("%s_Authenticated.\nChoose mode:\n1. Play vs Bot\n2. Play vs Player\n", clientKey)))
 
-	waitingRoom <- client
+	modeLine, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Println("Read mode error:", err)
+		return
+	}
+	mode := strings.TrimSpace(modeLine)
+
+	switch mode {
+	case "1":
+		go startBotGame(client)
+	case "2":
+		conn.Write([]byte("Waiting for another player...\n"))
+		waitingRoom <- client
+	default:
+		conn.Write([]byte("Invalid mode. Disconnecting.\n"))
+		return
+	}
 
 	go listenClientInput(client)
 
 	// Keep connection alive
 	select {}
 }
+func startBotGame(p1 *Client) {
+	globalMu.Lock()
+	roomCount++
+	roomID := roomCount
+	globalMu.Unlock()
+
+	bot := &Client{
+		username:  "Bot",
+		clientKey: "Bot",
+		mana:      0,
+		inputCh:   make(chan string, 10),
+	}
+
+	room := &Room{
+		id:      roomID,
+		clients: [2]*Client{p1, bot},
+		troops:  []*Troop{},
+		towerHP: map[int]map[string]int{
+			1: {"L": 100, "C": 100, "R": 100},
+			2: {"L": 100, "C": 100, "R": 100},
+		},
+	}
+	p1.roomID = roomID
+	bot.roomID = roomID
+	rooms[roomID] = room
+
+	// Giả lập bot hành động
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			if bot.mana >= 5 {
+				bot.inputCh <- "1" // ví dụ: luôn gọi troop loại 1 bên lane L
+			}
+		}
+	}()
+
+	go gameLoop(room)
+}
+
 
 func listenClientInput(client *Client) {
 	reader := bufio.NewReader(client.conn)
@@ -389,10 +445,8 @@ func renderMap(room *Room) string {
 		symbol := fmt.Sprintf("%s%d", typeChar, t.player)
 
 		if t.player == 2 {
-			// Player 1: đi từ trái -> phải
 			lanes[t.lane][t.position] = symbol
 		} else {
-			// Player 2: đi từ phải -> trái (vị trí hiển thị ngược lại)
 			lanes[t.lane][4-t.position] = symbol
 		}
 	}
@@ -410,9 +464,7 @@ func renderMap(room *Room) string {
 
 	lineSep := "                          --- --- --- --- ---"
 
-	// Kết cấu bản đồ đầy đủ
-	mapStr := fmt.Sprintf(`
-+---------------------- TEXT CLASH ROYALE MAP ----------------------+
+	mapStr := fmt.Sprintf(`+---------------------- TEXT CLASH ROYALE MAP ----------------------+
 
 [P1 TowerL - %s]  ===>  | %s | %s | %s | %s | %s |  <===  [P2 TowerL - %s]
 %s
@@ -420,8 +472,7 @@ func renderMap(room *Room) string {
 %s
 [P1 TowerR - %s]  ===>  | %s | %s | %s | %s | %s |  <===  [P2 TowerR - %s]
 
-+------------------------------------------------------------------+
-`,
++------------------------------------------------------------------+`,
 		formatHP(p1HP["L"]), lanes["L"][0], lanes["L"][1], lanes["L"][2], lanes["L"][3], lanes["L"][4], formatHP(p2HP["L"]),
 		lineSep,
 		formatHP(p1HP["C"]), lanes["C"][0], lanes["C"][1], lanes["C"][2], lanes["C"][3], lanes["C"][4], formatHP(p2HP["C"]),
@@ -431,3 +482,4 @@ func renderMap(room *Room) string {
 
 	return mapStr
 }
+

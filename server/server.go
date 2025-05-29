@@ -307,7 +307,7 @@ func gameLoop(room *Room) {
 		p2.conn.Write([]byte(fmt.Sprintf("%s\n", startMsg)))
 	}
 
-	ticker := time.NewTicker(4* time.Second)
+	ticker := time.NewTicker(1* time.Second)
 	defer ticker.Stop()
 
 	gameOver := false
@@ -351,14 +351,14 @@ loop:
 			updateTroops(room)
 			applyTowerDamage(room)
 
-			if room.towerHP[1]["C"] < 0 {
+			if room.towerHP[1]["C"] <= 0 {
 				gameOver = true
 				winner = 2
 				reason = "king_tower"
 				room.mu.Unlock()
 				break loop
 			}
-			if room.towerHP[2]["C"] < 0 {
+			if room.towerHP[2]["C"] <= 0 {
 				gameOver = true
 				winner = 1
 				reason = "king_tower"

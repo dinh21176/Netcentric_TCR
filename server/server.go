@@ -296,10 +296,8 @@ func gameLoop(room *Room) {
 	startMsg := `Game started! Commands:
 	1-L: Deploy type 1 to Left lane
 	1-R: Deploy type 1 to Right lane
-	1-C: Deploy type 1 to Center lane
 	2-L: Deploy type 2 to Left lane
 	2-R: Deploy type 2 to Right lane
-	2-C: Deploy type 2 to Center lane
 	Type exactly as shown (e.g. "2-R")`
 
 	if p1.conn != nil {
@@ -309,7 +307,7 @@ func gameLoop(room *Room) {
 		p2.conn.Write([]byte(fmt.Sprintf("%s\n", startMsg)))
 	}
 
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(4* time.Second)
 	defer ticker.Stop()
 
 	gameOver := false
@@ -353,14 +351,14 @@ loop:
 			updateTroops(room)
 			applyTowerDamage(room)
 
-			if room.towerHP[1]["C"] <= 0 {
+			if room.towerHP[1]["C"] < 0 {
 				gameOver = true
 				winner = 2
 				reason = "king_tower"
 				room.mu.Unlock()
 				break loop
 			}
-			if room.towerHP[2]["C"] <= 0 {
+			if room.towerHP[2]["C"] < 0 {
 				gameOver = true
 				winner = 1
 				reason = "king_tower"
@@ -525,7 +523,10 @@ func processCommand(room *Room, player int, cmd string) {
 		return
 	}
 
-	if lane != "L" && lane != "C" && lane != "R" {
+	if lane != "L" && lane != "R" {
+		if room.clients[player-1].conn != nil {
+			room.clients[player-1].conn.Write([]byte("Invalid lane! Use L or R.\n"))
+		}
 		return
 	}
 
@@ -587,7 +588,7 @@ func updateTroops(room *Room) {
 			continue
 		}
 
-		enemy := findEnemyTroopAt(room, t, nextPos)
+		enemy := findEnemyTroopAt(room, t, 4-t.position)
 		if enemy != nil {
 			if enemy.troopType == t.troopType {
 				t.alive = false
@@ -668,7 +669,7 @@ func renderMap(room *Room) string {
 	}
 
 	formatHP := func(hp int) string {
-		if hp <= 0 {
+		if hp < 5 {
 			return "X"
 		}
 		return fmt.Sprintf("%d", hp)

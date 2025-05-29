@@ -42,8 +42,8 @@ type Troop struct {
 // Room represents a game session between two clients (or client and bot)
 type Room struct {
 	id       int
-	clients  [2]*Client // Player 1 and Player 2 (or Bot)
-	troops   []*Troop   // All active troops in the room
+	clients  [2]*Client             // Player 1 and Player 2 (or Bot)
+	troops   []*Troop               // All active troops in the room
 	towerHP  map[int]map[string]int // Tower HP for each player and lane
 	mu       sync.Mutex             // Mutex to protect room data
 	doneChan chan struct{}          // Channel to signal game over
@@ -59,15 +59,15 @@ type PlayerData struct {
 }
 
 var (
-	clients        = make(map[string]*Client)    // All active client connections
-	rooms          = make(map[int]*Room)        // All active game rooms
-	waitingRoom    = make(chan *Client, 100)    // Channel for clients waiting for a PvP match
-	clientCount    = 0                          // Global counter for client keys
-	roomCount      = 0                          // Global counter for room IDs
-	globalMu       sync.Mutex                   // Mutex to protect global maps (clients, rooms)
-	playerDataFile = "players.json"             // File to store player data
-	onlineUsers    = make(map[string]bool)      // Map to track currently logged-in usernames
-	onlineUsersMu  sync.Mutex                   // Mutex to protect onlineUsers map
+	clients        = make(map[string]*Client) // All active client connections
+	rooms          = make(map[int]*Room)      // All active game rooms
+	waitingRoom    = make(chan *Client, 100)  // Channel for clients waiting for a PvP match
+	clientCount    = 0                        // Global counter for client keys
+	roomCount      = 0                        // Global counter for room IDs
+	globalMu       sync.Mutex                 // Mutex to protect global maps (clients, rooms)
+	playerDataFile = "players.json"           // File to store player data
+	onlineUsers    = make(map[string]bool)    // Map to track currently logged-in usernames
+	onlineUsersMu  sync.Mutex                 // Mutex to protect onlineUsers map
 )
 
 func main() {
@@ -118,7 +118,7 @@ func savePlayerData(player PlayerData) error {
 		return err
 	}
 
-	players[player.Username] = player // Update (or add) the specific player's data
+	players[player.Username] = player                  // Update (or add) the specific player's data
 	data, err := json.MarshalIndent(players, "", "  ") // Marshal the entire map back to JSON
 	if err != nil {
 		return err
@@ -512,7 +512,10 @@ func gameLoop(room *Room) {
     1-R: Deploy type 1 to Right lane
     2-L: Deploy type 2 to Left lane
     2-R: Deploy type 2 to Right lane
-    Type exactly as shown (e.g. "2-R")`
+    Type exactly as shown (e.g. "2-R")
+
+    Strategy:
+    - Destroy both Left and Right Towers before attacking the King Tower`
 
 	if p1.conn != nil {
 		p1.conn.Write([]byte(fmt.Sprintf("%s\n", startMsg)))
@@ -565,6 +568,7 @@ loop:
 			updateTroops(room)
 			applyTowerDamage(room)
 
+			// Only check king tower for game end
 			if room.towerHP[1]["C"] <= 0 {
 				gameOver = true
 				winner = 2
@@ -890,9 +894,29 @@ func applyTowerDamage(room *Room) {
 			room.towerHP[enemyPlayer][t.lane] = 0
 		}
 
-		if (t.lane == "L" || t.lane == "R") && room.towerHP[enemyPlayer][t.lane] <= 0 {
-			t.lane = "C"
-			t.position = 4
+		// Enhanced tower destruction logic
+		if t.lane == "L" && room.towerHP[enemyPlayer]["L"] <= 0 {
+			// Tower destroyed - check if right tower is also destroyed
+			if room.towerHP[enemyPlayer]["R"] <= 0 {
+				// Both side towers destroyed - move to center
+				t.lane = "C"
+				t.position = 4
+			} else {
+				// Only left tower destroyed - move to right tower
+				t.lane = "R"
+				t.position = 4
+			}
+		} else if t.lane == "R" && room.towerHP[enemyPlayer]["R"] <= 0 {
+			// Tower destroyed - check if left tower is also destroyed
+			if room.towerHP[enemyPlayer]["L"] <= 0 {
+				// Both side towers destroyed - move to center
+				t.lane = "C"
+				t.position = 4
+			} else {
+				// Only right tower destroyed - move to left tower
+				t.lane = "L"
+				t.position = 4
+			}
 		}
 	}
 }

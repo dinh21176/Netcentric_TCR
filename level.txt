@@ -1,0 +1,99 @@
+EXP and Level System:
+
+Added exp and level fields to the Client struct
+
+Players start at level 1 with 0 EXP
+
+EXP is displayed in the status line
+
+EXP Calculation:
+
+Added requiredExpForLevel() function that calculates required EXP using:
+base * (1.1)^(level-1) (100 for level 1→2, 110 for level 2→3, etc.)
+
+Added addExp() method to Client that:
+
+Awards EXP to players
+
+Checks for level ups
+
+Announces level ups with a special message
+
+EXP Awarding:
+
+Winners receive 30 EXP after each game
+
+Winners see a message: "You gained 30 EXP! Total EXP: X/Y"
+
+Level up announcements: "=== LEVEL UP! You've reached LEVEL X! ==="
+
+Status Display:
+
+Modified the status line to show:
+C1_Mana: 58, Level: 2, EXP: 50/110
+
+Shows current level and progress to next level
+
+Initialization:
+
+New players start at level 1 with 0 EXP
+
+Bot accounts also have level/EXP (though not used)
+
+How It Works:
+When a player wins a game:
+
+go
+if winner == 1 && p1.conn != nil {
+    p1.addExp(30)
+    p1.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! ...")))
+}
+The addExp method:
+
+go
+func (c *Client) addExp(exp int) {
+    c.exp += exp
+    required := requiredExpForLevel(c.level)
+    
+    for c.exp >= required {
+        c.level++
+        c.exp -= required
+        c.conn.Write([]byte(fmt.Sprintf("\n\n=== LEVEL UP! ...")))
+        required = requiredExpForLevel(c.level)
+    }
+}
+EXP requirements grow exponentially:
+
+go
+func requiredExpForLevel(level int) int {
+    base := 100.0
+    return int(base * math.Pow(1.1, float64(level-1)))
+}
+Example Flow:
+Player wins first game:
+
+Gains 30 EXP (30/100 for level 2)
+
+Sees: "You gained 30 EXP! Total EXP: 30/100"
+
+Player wins second game:
+
+Gains another 30 EXP (total 60/100)
+
+Sees: "You gained 30 EXP! Total EXP: 60/100"
+
+Player wins third game:
+
+Gains 30 EXP (total 90/100 → still not enough)
+
+Sees: "You gained 30 EXP! Total EXP: 90/100"
+
+Player wins fourth game:
+
+Gains 30 EXP (total 120/100 → level up!)
+
+Sees:
+"=== LEVEL UP! You've reached LEVEL 2! ==="
+"You gained 30 EXP! Total EXP: 20/110"
+
+The system provides clear feedback about EXP gains and level progression, with special announcements for level ups. Players can see their current level and EXP progress in the status line during gameplay.

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"math"
 	"math/rand"
 	"net"
 	"strconv"
@@ -20,7 +21,9 @@ type Client struct {
 	inputCh   chan string
 	botLevel  int
 	gameMode  string
-	ready     bool // Add ready flag for replay
+	ready     bool
+	exp       int // Add EXP field
+	level     int // Add level field
 }
 
 type Troop struct {
@@ -82,7 +85,29 @@ func resetRoom(room *Room) {
 	for _, client := range room.clients {
 		if client != nil {
 			client.mana = 0
-			client.ready = false // Reset ready flag
+			client.ready = false
+		}
+	}
+}
+
+// Calculate required EXP for next level
+func requiredExpForLevel(level int) int {
+	base := 100.0
+	return int(base * math.Pow(1.1, float64(level-1)))
+}
+
+// Add EXP to player and check for level up
+func (c *Client) addExp(exp int) {
+	c.exp += exp
+	required := requiredExpForLevel(c.level)
+
+	for c.exp >= required {
+		c.level++
+		c.exp -= required
+		required = requiredExpForLevel(c.level)
+
+		if c.conn != nil {
+			c.conn.Write([]byte(fmt.Sprintf("\n\n=== LEVEL UP! You've reached LEVEL %d! ===\n\n", c.level)))
 		}
 	}
 }
@@ -121,11 +146,14 @@ func handleConnection(conn net.Conn) {
 		botLevel:  0,
 		gameMode:  "",
 		ready:     false,
+		exp:       0, // Initialize EXP
+		level:     1, // Start at level 1
 	}
 	clients[clientKey] = client
 	globalMu.Unlock()
 
-	conn.Write([]byte(fmt.Sprintf("%s_Authenticated.\nChoose mode:\n1. Play vs Bot\n2. Play vs Player\n", clientKey)))
+	conn.Write([]byte(fmt.Sprintf("%s_Authenticated. Level: %d, EXP: %d/%d\nChoose mode:\n1. Play vs Bot\n2. Play vs Player\n",
+		clientKey, client.level, client.exp, requiredExpForLevel(client.level))))
 
 	modeLine, err := reader.ReadString('\n')
 	if err != nil {
@@ -186,6 +214,8 @@ func startBotGame(p1 *Client, level int) {
 		botLevel:  level,
 		gameMode:  "bot",
 		ready:     false,
+		exp:       0,
+		level:     1,
 	}
 
 	room := &Room{
@@ -307,12 +337,13 @@ func gameLoop(room *Room) {
 		p2.conn.Write([]byte(fmt.Sprintf("%s\n", startMsg)))
 	}
 
-	ticker := time.NewTicker(1* time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	gameOver := false
 	winner := 0
 	reason := ""
+	//draw := false
 
 loop:
 	for {
@@ -367,11 +398,14 @@ loop:
 			}
 
 			mapStr := renderMap(room)
+			// Add level and EXP to status display
 			if p1.conn != nil {
-				p1.conn.Write([]byte(fmt.Sprintf("%s_Mana: %d\n%s\n", p1.clientKey, p1.mana, mapStr)))
+				p1.conn.Write([]byte(fmt.Sprintf("%s_Mana: %d, Level: %d, EXP: %d/%d\n%s\n",
+					p1.clientKey, p1.mana, p1.level, p1.exp, requiredExpForLevel(p1.level), mapStr)))
 			}
 			if p2.conn != nil && p2 != p1 {
-				p2.conn.Write([]byte(fmt.Sprintf("%s_Mana: %d\n%s\n", p2.clientKey, p2.mana, mapStr)))
+				p2.conn.Write([]byte(fmt.Sprintf("%s_Mana: %d, Level: %d, EXP: %d/%d\n%s\n",
+					p2.clientKey, p2.mana, p2.level, p2.exp, requiredExpForLevel(p2.level), mapStr)))
 			}
 			room.mu.Unlock()
 		}
@@ -385,11 +419,37 @@ loop:
 					c.conn.Write([]byte(fmt.Sprintf("\nGAME OVER! Player %d wins by destroying the King Tower!\n", winner)))
 				}
 			}
+
+			// Award EXP to winner
+			if winner == 1 && p1.conn != nil {
+				p1.addExp(30)
+				if p1.conn != nil {
+					p1.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
+						p1.exp, requiredExpForLevel(p1.level))))
+				}
+			} else if winner == 2 && p2.conn != nil {
+				p2.addExp(30)
+				if p2.conn != nil {
+					p2.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
+						p2.exp, requiredExpForLevel(p2.level))))
+				}
+			}
+
 		case "disconnect":
 			if winner == 1 && p1.conn != nil {
 				p1.conn.Write([]byte("\nGAME OVER! You win! Opponent disconnected.\n"))
+				p1.addExp(30)
+				if p1.conn != nil {
+					p1.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
+						p1.exp, requiredExpForLevel(p1.level))))
+				}
 			} else if winner == 2 && p2.conn != nil {
 				p2.conn.Write([]byte("\nGAME OVER! You win! Opponent disconnected.\n"))
+				p2.addExp(30)
+				if p2.conn != nil {
+					p2.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
+						p2.exp, requiredExpForLevel(p2.level))))
+				}
 			}
 		}
 
@@ -669,7 +729,7 @@ func renderMap(room *Room) string {
 	}
 
 	formatHP := func(hp int) string {
-		if hp < 5 {
+		if hp <= 0 {
 			return "X"
 		}
 		return fmt.Sprintf("%d", hp)

@@ -1,0 +1,51 @@
+{
+  "player1": {
+    "Username": "player1",
+    "Password": "",
+    "ClientKey": "C1",
+    "Level": 1,
+    "Exp": 30
+  },
+  "player2": {
+    "Username": "player2",
+    "Password": "pass",
+    "ClientKey": "C2",
+    "Level": 1,
+    "Exp": 0
+  },
+  "player3": {
+    "Username": "player3",
+    "Password": "passs",
+    "ClientKey": "C2",
+    "Level": 1,
+    "Exp": 0
+  },
+  "u": {
+    "Username": "u",
+    "Password": "s",
+    "ClientKey": "C2",
+    "Level": 1,
+    "Exp": 0
+  },
+  "user1": {
+    "Username": "user1",
+    "Password": "pass",
+    "ClientKey": "C1",
+    "Level": 1,
+    "Exp": 0
+  },
+  "user3": {
+    "Username": "user3",
+    "Password": "pass",
+    "ClientKey": "C1",
+    "Level": 1,
+    "Exp": 0
+  },
+  "user4": {
+    "Username": "user4",
+    "Password": "pass",
+    "ClientKey": "C3",
+    "Level": 1,
+    "Exp": 0
+  }
+}

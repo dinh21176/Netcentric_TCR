@@ -18,16 +18,17 @@ type Client struct {
 	roomID    int
 	mana      int
 	inputCh   chan string
-	botLevel  int    // 0 for human, 1-3 for bot difficulty
-	gameMode  string // "bot" or "pvp"
+	botLevel  int
+	gameMode  string
+	ready     bool // Add ready flag for replay
 }
 
 type Troop struct {
-	player    int    // 1 or 2
-	troopType int    // 1 or 2
-	lane      string // "L", "C", "R"
-	position  int    // 0..4 position on lane (0 nearest tower, 4 furthest)
-	age       int    // for timing movement (move every 4 seconds)
+	player    int
+	troopType int
+	lane      string
+	position  int
+	age       int
 	alive     bool
 }
 
@@ -35,9 +36,9 @@ type Room struct {
 	id       int
 	clients  [2]*Client
 	troops   []*Troop
-	towerHP  map[int]map[string]int // player -> lane -> hp
+	towerHP  map[int]map[string]int
 	mu       sync.Mutex
-	doneChan chan struct{} // Signal channel to stop bot commands
+	doneChan chan struct{}
 }
 
 var (
@@ -70,11 +71,26 @@ func main() {
 	}
 }
 
+func resetRoom(room *Room) {
+	room.mu.Lock()
+	defer room.mu.Unlock()
+
+	room.towerHP[1] = map[string]int{"L": 100, "C": 100, "R": 100}
+	room.towerHP[2] = map[string]int{"L": 100, "C": 100, "R": 100}
+	room.troops = []*Troop{}
+
+	for _, client := range room.clients {
+		if client != nil {
+			client.mana = 0
+			client.ready = false // Reset ready flag
+		}
+	}
+}
+
 func handleConnection(conn net.Conn) {
 	defer conn.Close()
 	reader := bufio.NewReader(conn)
 
-	// Read auth
 	authLine, err := reader.ReadString('\n')
 	if err != nil {
 		fmt.Println("Read auth error:", err)
@@ -104,6 +120,7 @@ func handleConnection(conn net.Conn) {
 		inputCh:   make(chan string, 10),
 		botLevel:  0,
 		gameMode:  "",
+		ready:     false,
 	}
 	clients[clientKey] = client
 	globalMu.Unlock()
@@ -146,7 +163,6 @@ func handleConnection(conn net.Conn) {
 
 	go listenClientInput(client)
 
-	// Keep connection alive until client disconnects
 	for {
 		select {
 		case <-time.After(10 * time.Minute):
@@ -169,6 +185,7 @@ func startBotGame(p1 *Client, level int) {
 		inputCh:   make(chan string, 10),
 		botLevel:  level,
 		gameMode:  "bot",
+		ready:     false,
 	}
 
 	room := &Room{
@@ -184,7 +201,6 @@ func startBotGame(p1 *Client, level int) {
 	bot.roomID = roomID
 	rooms[roomID] = room
 
-	// Bot command generator
 	go func() {
 		for {
 			select {
@@ -267,7 +283,6 @@ func matchPlayers() {
 }
 
 func gameLoop(room *Room) {
-	// Cleanup when game ends
 	defer func() {
 		close(room.doneChan)
 		globalMu.Lock()
@@ -278,9 +293,8 @@ func gameLoop(room *Room) {
 	p1 := room.clients[0]
 	p2 := room.clients[1]
 
-	// In gameLoop:
 	startMsg := `Game started! Commands:
-	-L: Deploy type 1 to Left lane
+	1-L: Deploy type 1 to Left lane
 	1-R: Deploy type 1 to Right lane
 	1-C: Deploy type 1 to Center lane
 	2-L: Deploy type 2 to Left lane
@@ -307,27 +321,28 @@ loop:
 		select {
 		case cmd, ok := <-p1.inputCh:
 			if !ok {
-				// Player 1 disconnected
 				winner = 2
 				reason = "disconnect"
 				gameOver = true
 				break loop
 			}
+			room.mu.Lock()
 			processCommand(room, 1, cmd)
+			room.mu.Unlock()
 
 		case cmd, ok := <-p2.inputCh:
 			if !ok {
-				// Player 2 disconnected
 				winner = 1
 				reason = "disconnect"
 				gameOver = true
 				break loop
 			}
+			room.mu.Lock()
 			processCommand(room, 2, cmd)
+			room.mu.Unlock()
 
 		case <-ticker.C:
 			room.mu.Lock()
-			// Increase mana
 			if p1.mana < 100 {
 				p1.mana += 1
 			}
@@ -338,7 +353,6 @@ loop:
 			updateTroops(room)
 			applyTowerDamage(room)
 
-			// Check if king tower destroyed
 			if room.towerHP[1]["C"] <= 0 {
 				gameOver = true
 				winner = 2
@@ -365,7 +379,6 @@ loop:
 		}
 	}
 
-	// Handle game over
 	if gameOver {
 		switch reason {
 		case "king_tower":
@@ -382,83 +395,137 @@ loop:
 			}
 		}
 
-		// Prompt players to play again
-		for i, client := range room.clients {
+		// FIXED REPLAY SYSTEM
+		// Ask both players if they want to replay
+		for _, client := range room.clients {
 			if client.clientKey == "Bot" {
 				continue
 			}
 			if client.conn != nil {
 				client.conn.Write([]byte("\nPlay again? (Y/N)\n"))
-
-				// Set timeout for response
-				go func(idx int, c *Client) {
-					reader := bufio.NewReader(c.conn)
-					response, err := reader.ReadString('\n')
-					if err != nil {
-						c.conn.Close()
-						return
-					}
-
-					response = strings.TrimSpace(strings.ToUpper(response))
-					if response == "Y" {
-						// Reset client state
-						c.roomID = 0
-						c.mana = 0
-
-						// Clear input channel
-						for len(c.inputCh) > 0 {
-							<-c.inputCh
-						}
-
-						// Restart game based on previous mode
-						if c.gameMode == "bot" {
-							// Get bot level from opponent
-							opponent := room.clients[1-idx]
-							if opponent != nil && opponent.botLevel > 0 {
-								go startBotGame(c, opponent.botLevel)
-							}
-						} else if c.gameMode == "pvp" {
-							waitingRoom <- c
-						}
-					} else {
-						c.conn.Write([]byte("Thanks for playing! Goodbye!\n"))
-						c.conn.Close()
-					}
-				}(i, client)
+				client.ready = false
 			}
+		}
+
+		// Wait for responses
+		timeout := time.After(30 * time.Second)
+		responsesReceived := 0
+		totalPlayers := 0
+		for _, client := range room.clients {
+			if client.clientKey != "Bot" && client.conn != nil {
+				totalPlayers++
+			}
+		}
+
+		for responsesReceived < totalPlayers {
+			select {
+			case cmd, ok := <-p1.inputCh:
+				if !ok {
+					break
+				}
+				if handleReplayResponse(room, p1, cmd) {
+					responsesReceived++
+				}
+
+			case cmd, ok := <-p2.inputCh:
+				if !ok {
+					break
+				}
+				if handleReplayResponse(room, p2, cmd) {
+					responsesReceived++
+				}
+
+			case <-timeout:
+				for _, c := range room.clients {
+					if c.conn != nil {
+						c.conn.Write([]byte("Replay timeout. Disconnecting.\n"))
+						c.conn.Close()
+					}
+				}
+				return
+			}
+		}
+
+		// Check if all players want to replay
+		allWantReplay := true
+		for _, client := range room.clients {
+			if client.clientKey != "Bot" && client.conn != nil && !client.ready {
+				allWantReplay = false
+			}
+		}
+
+		if allWantReplay {
+			resetRoom(room)
+			gameOver = false
+			winner = 0
+			reason = ""
+
+			// Clear input channels
+			for _, client := range room.clients {
+				for len(client.inputCh) > 0 {
+					<-client.inputCh
+				}
+			}
+
+			// Send restart message
+			startMsg := "Starting new game!\n"
+			for _, client := range room.clients {
+				if client.conn != nil {
+					client.conn.Write([]byte(startMsg))
+				}
+			}
+
+			// Restart game loop
+			goto loop
+		} else {
+			for _, c := range room.clients {
+				if c.conn != nil {
+					c.conn.Write([]byte("Thanks for playing! Goodbye!\n"))
+					c.conn.Close()
+				}
+			}
+			return
 		}
 	}
 }
 
-func processCommand(room *Room, player int, cmd string) {
-	room.mu.Lock()
-	defer room.mu.Unlock()
+// Helper function to handle replay responses
+func handleReplayResponse(room *Room, client *Client, cmd string) bool {
+	cmd = strings.ToUpper(strings.TrimSpace(cmd))
+	if cmd == "Y" {
+		client.ready = true
+		client.conn.Write([]byte("Ready for next game!\n"))
+		return true
+	} else if cmd == "N" {
+		client.ready = false
+		client.conn.Write([]byte("Ending session. Goodbye!\n"))
+		return true
+	}
+	return false
+}
 
+func processCommand(room *Room, player int, cmd string) {
 	cmd = strings.ToUpper(strings.TrimSpace(cmd))
 	var troopType int
 	var lane string
 
-	// Support more commands
-	switch cmd {
-	case "1-L", "1-l":
+	parts := strings.Split(cmd, "-")
+	if len(parts) != 2 {
+		return
+	}
+
+	troopTypeStr := parts[0]
+	lane = parts[1]
+
+	if troopTypeStr == "1" {
 		troopType = 1
-		lane = "L"
-	case "1-R", "1-r":
-		troopType = 1
-		lane = "R"
-	case "2-L", "2-l":
+	} else if troopTypeStr == "2" {
 		troopType = 2
-		lane = "L"
-	case "2-R", "2-r":
-		troopType = 2
-		lane = "R"
-	case "1-C", "1-c":
-		troopType = 1
-		lane = "C"
-	case "2-C", "2-c":
-		troopType = 2
-		lane = "C"
-	default:
+	} else {
+		return
+	}
+
+	if lane != "L" && lane != "C" && lane != "R" {
 		return
 	}
 
@@ -487,7 +554,6 @@ func processCommand(room *Room, player int, cmd string) {
 	}
 	room.troops = append(room.troops, newTroop)
 
-	// Send confirmation
 	if c.conn != nil {
 		c.conn.Write([]byte(fmt.Sprintf("Deployed troop type %d to %s lane\n", troopType, lane)))
 	}
@@ -510,8 +576,6 @@ func updateTroops(room *Room) {
 			continue
 		}
 		t.age++
-
-		// Move troops every 2 seconds (was 4)
 		if t.age%2 != 0 {
 			newTroops = append(newTroops, t)
 			continue
@@ -519,37 +583,29 @@ func updateTroops(room *Room) {
 
 		nextPos := t.position - 1
 		if nextPos < 0 {
-			// Troop is at tower position (0)
 			newTroops = append(newTroops, t)
 			continue
 		}
 
-		// Check for enemy troops at next position
 		enemy := findEnemyTroopAt(room, t, nextPos)
 		if enemy != nil {
-			// Battle logic
 			if enemy.troopType == t.troopType {
-				// Same type - both die
 				t.alive = false
 				enemy.alive = false
 			} else if enemy.troopType > t.troopType {
-				// Enemy stronger - our troop dies
 				t.alive = false
 			} else {
-				// Our troop stronger - enemy dies
 				enemy.alive = false
-				t.position = nextPos // Move forward after defeating enemy
+				t.position = nextPos
 			}
 			newTroops = append(newTroops, t)
 			continue
 		}
 
-		// No enemy - move forward
 		t.position = nextPos
 		newTroops = append(newTroops, t)
 	}
 
-	// Filter out dead troops
 	var aliveTroops []*Troop
 	for _, t := range newTroops {
 		if t.alive {
@@ -566,9 +622,9 @@ func applyTowerDamage(room *Room) {
 		}
 
 		enemyPlayer := 3 - t.player
-		damage := 10 // Increased from 5
+		damage := 10
 		if t.troopType == 2 {
-			damage = 15 // Stronger troop does more damage
+			damage = 15
 		}
 
 		room.towerHP[enemyPlayer][t.lane] -= damage
@@ -576,29 +632,20 @@ func applyTowerDamage(room *Room) {
 			room.towerHP[enemyPlayer][t.lane] = 0
 		}
 
-		// Special case for King Tower destruction
-		if t.lane == "C" && room.towerHP[enemyPlayer]["C"] <= 0 {
-			// Game over handled in game loop
-			continue
-		}
-
-		// When side tower is destroyed, redirect troops to center
 		if (t.lane == "L" || t.lane == "R") && room.towerHP[enemyPlayer][t.lane] <= 0 {
 			t.lane = "C"
-			t.position = 4 // Send to back of center lane
+			t.position = 4
 		}
 	}
 }
 
 func renderMap(room *Room) string {
-	// Tạo lane trống với 5 bước mỗi lane
 	lanes := map[string][]string{
 		"L": {" ", " ", " ", " ", " "},
 		"C": {" ", " ", " ", " ", " "},
 		"R": {" ", " ", " ", " ", " "},
 	}
 
-	// Đặt troop lên lane
 	for _, t := range room.troops {
 		if !t.alive || t.position < 0 || t.position > 4 {
 			continue
@@ -620,7 +667,6 @@ func renderMap(room *Room) string {
 		}
 	}
 
-	// Xử lý HP hiển thị
 	formatHP := func(hp int) string {
 		if hp <= 0 {
 			return "X"

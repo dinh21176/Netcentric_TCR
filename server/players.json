@@ -1,24 +1,24 @@
 {
   "player1": {
     "Username": "player1",
-    "Password": "",
-    "ClientKey": "C1",
+    "Password": "pass",
+    "ClientKey": "C2",
     "Level": 1,
-    "Exp": 30
+    "Exp": 90
   },
   "player2": {
     "Username": "player2",
     "Password": "pass",
-    "ClientKey": "C2",
+    "ClientKey": "C3",
     "Level": 1,
-    "Exp": 0
+    "Exp": 30
   },
   "player3": {
     "Username": "player3",
-    "Password": "passs",
-    "ClientKey": "C2",
+    "Password": "",
+    "ClientKey": "C4",
     "Level": 1,
-    "Exp": 0
+    "Exp": 30
   },
   "u": {
     "Username": "u",

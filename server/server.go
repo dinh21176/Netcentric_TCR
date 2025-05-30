@@ -37,11 +37,6 @@ type Troop struct {
 	position  int    // Current position on the lane (0-4)
 	age       int    // How many ticks the troop has been alive
 	alive     bool   // Is the troop still active?
-<<<<<<< Updated upstream
-	hp        int    // Current hit points
-    attack    int    // Attack damage
-    def       int    // Defense value
-=======
 	hp        int    // Current HP
 	atk       int    // Attack power
 	def       int    // Defense
@@ -53,20 +48,10 @@ type Tower struct {
 	atk  int
 	def  int
 	crit float64
->>>>>>> Stashed changes
 }
 
 // Room represents a game session between two clients (or client and bot)
 type Room struct {
-<<<<<<< Updated upstream
-    id              int
-    clients         [2]*Client
-    troops          []*Troop
-    towerHP         map[int]map[string]int
-    towerLastAttacked map[int]map[string]time.Time // Thời gian tower bị tấn công lần cuối
-    mu              sync.Mutex
-    doneChan        chan struct{}
-=======
 	id       int
 	clients  [2]*Client                // Player 1 and Player 2 (or Bot)
 	troops   []*Troop                  // All active troops in the room
@@ -75,7 +60,6 @@ type Room struct {
 	mu       sync.Mutex                // Mutex to protect room data
 	doneChan chan struct{}             // Channel to signal game over
 	started  time.Time                 // Game start time
->>>>>>> Stashed changes
 }
 
 // PlayerData stores persistent player information for saving/loading
@@ -192,18 +176,9 @@ func (c *Client) applyLevelScaling(base int) int {
 
 // resetRoom resets the game state for a given room
 func resetRoom(room *Room) {
-    room.mu.Lock()
-    defer room.mu.Unlock()
+	room.mu.Lock()
+	defer room.mu.Unlock()
 
-<<<<<<< Updated upstream
-    room.towerHP[1] = map[string]int{"L": 100, "C": 100, "R": 100}
-    room.towerHP[2] = map[string]int{"L": 100, "C": 100, "R": 100}
-    room.troops = []*Troop{}
-    // Thêm biến để theo dõi trạng thái hồi HP của tower
-    room.towerLastAttacked = make(map[int]map[string]time.Time)
-    room.towerLastAttacked[1] = map[string]time.Time{"L": time.Now(), "C": time.Now(), "R": time.Now()}
-    room.towerLastAttacked[2] = map[string]time.Time{"L": time.Now(), "C": time.Now(), "R": time.Now()}
-=======
 	// Initialize towers
 	room.tower = make(map[int]map[string]*Tower)
 	room.towerHP = make(map[int]map[string]int)
@@ -254,14 +229,13 @@ func resetRoom(room *Room) {
 
 	room.troops = []*Troop{}
 	room.started = time.Now()
->>>>>>> Stashed changes
 
-    for _, client := range room.clients {
-        if client != nil {
-            client.mana = 0
-            client.ready = false
-        }
-    }
+	for _, client := range room.clients {
+		if client != nil {
+			client.mana = 0
+			client.ready = false // Reset ready state for replay
+		}
+	}
 }
 
 // requiredExpForLevel calculates the EXP needed for the next level
@@ -503,42 +477,25 @@ func listenClientInput(client *Client) {
 // --- Player Matching ---
 
 func matchPlayers() {
-    for {
-        p1 := <-waitingRoom
-        p2 := <-waitingRoom
+	for {
+		p1 := <-waitingRoom
+		p2 := <-waitingRoom
 
-        if p1.conn == nil || p2.conn == nil {
-            fmt.Println("One or both clients disconnected before matching. Retrying match.")
-            if p1.conn != nil {
-                waitingRoom <- p1
-            } else if p2.conn != nil {
-                waitingRoom <- p2
-            }
-            continue
-        }
+		if p1.conn == nil || p2.conn == nil {
+			fmt.Println("One or both clients disconnected before matching. Retrying match.")
+			if p1.conn != nil {
+				waitingRoom <- p1
+			} else if p2.conn != nil {
+				waitingRoom <- p2
+			}
+			continue
+		}
 
-        globalMu.Lock()
-        roomCount++
-        roomID := roomCount
-        globalMu.Unlock()
+		globalMu.Lock()
+		roomCount++
+		roomID := roomCount
+		globalMu.Unlock()
 
-<<<<<<< Updated upstream
-        room := &Room{
-            id:       roomID,
-            clients:  [2]*Client{p1, p2},
-            troops:   []*Troop{},
-            towerHP:  make(map[int]map[string]int),
-            towerLastAttacked: make(map[int]map[string]time.Time), // Khởi tạo towerLastAttacked
-            doneChan: make(chan struct{}),
-        }
-        room.towerHP[1] = map[string]int{"L": 100, "C": 100, "R": 100}
-        room.towerHP[2] = map[string]int{"L": 100, "C": 100, "R": 100}
-        room.towerLastAttacked[1] = map[string]time.Time{"L": time.Now(), "C": time.Now(), "R": time.Now()}
-        room.towerLastAttacked[2] = map[string]time.Time{"L": time.Now(), "C": time.Now(), "R": time.Now()}
-        p1.roomID = roomID
-        p2.roomID = roomID
-        rooms[roomID] = room
-=======
 		room := &Room{
 			id:       roomID,
 			clients:  [2]*Client{p1, p2},
@@ -551,50 +508,32 @@ func matchPlayers() {
 		p2.roomID = roomID
 		rooms[roomID] = room
 		resetRoom(room)
->>>>>>> Stashed changes
 
-        fmt.Printf("Room %d created for %s (%s) vs %s (%s)\n", roomID, p1.username, p1.clientKey, p2.username, p2.clientKey)
+		fmt.Printf("Room %d created for %s (%s) vs %s (%s)\n", roomID, p1.username, p1.clientKey, p2.username, p2.clientKey)
 
-        go gameLoop(room)
-    }
+		go gameLoop(room)
+	}
 }
 
 // startBotGame initializes and starts a game with a bot
 func startBotGame(p1 *Client, level int) {
-    globalMu.Lock()
-    roomCount++
-    roomID := roomCount
-    globalMu.Unlock()
+	globalMu.Lock()
+	roomCount++
+	roomID := roomCount
+	globalMu.Unlock()
 
-    bot := &Client{
-        username:  fmt.Sprintf("BotLv%d", level),
-        clientKey: "Bot",
-        mana:      0,
-        inputCh:   make(chan string, 10),
-        botLevel:  level,
-        gameMode:  "bot",
-        ready:     false,
-        exp:       0,
-        level:     1,
-    }
+	bot := &Client{
+		username:  fmt.Sprintf("BotLv%d", level),
+		clientKey: "Bot",
+		mana:      0,
+		inputCh:   make(chan string, 10),
+		botLevel:  level,
+		gameMode:  "bot",
+		ready:     false,
+		exp:       0,
+		level:     1,
+	}
 
-<<<<<<< Updated upstream
-    room := &Room{
-        id:       roomID,
-        clients:  [2]*Client{p1, bot},
-        troops:   []*Troop{},
-        towerHP:  make(map[int]map[string]int),
-        towerLastAttacked: make(map[int]map[string]time.Time), // Khởi tạo towerLastAttacked
-        doneChan: make(chan struct{}),
-    }
-    room.towerHP[1] = map[string]int{"L": 100, "C": 100, "R": 100}
-    room.towerHP[2] = map[string]int{"L": 100, "C": 100, "R": 100}
-    room.towerLastAttacked[1] = map[string]time.Time{"L": time.Now(), "C": time.Now(), "R": time.Now()}
-    room.towerLastAttacked[2] = map[string]time.Time{"L": time.Now(), "C": time.Now(), "R": time.Now()}
-    p1.roomID = roomID
-    bot.roomID = roomID
-    rooms[roomID] = room
-=======
 	room := &Room{
 		id:       roomID,
 		clients:  [2]*Client{p1, bot},
@@ -607,48 +546,26 @@ func startBotGame(p1 *Client, level int) {
 	bot.roomID = roomID
 	rooms[roomID] = room
 	resetRoom(room)
->>>>>>> Stashed changes
 
-    fmt.Printf("Room %d created for %s (%s) vs %s\n", roomID, p1.username, p1.clientKey, bot.username)
+	fmt.Printf("Room %d created for %s (%s) vs %s\n", roomID, p1.username, p1.clientKey, bot.username)
 
-    go func() {
-        for {
-            select {
-            case <-room.doneChan:
-                return
-            default:
-                var delay time.Duration
-                switch level {
-                case 1:
-                    delay = 7 * time.Second
-                case 2:
-                    delay = 4 * time.Second
-                case 3:
-                    delay = 2 * time.Second
-                }
-                time.Sleep(delay)
+	go func() {
+		for {
+			select {
+			case <-room.doneChan:
+				return
+			default:
+				var delay time.Duration
+				switch level {
+				case 1:
+					delay = 7 * time.Second
+				case 2:
+					delay = 4 * time.Second
+				case 3:
+					delay = 2 * time.Second
+				}
+				time.Sleep(delay)
 
-<<<<<<< Updated upstream
-                room.mu.Lock()
-                if bot.mana >= 5 {
-                    var command string
-                    switch level {
-                    case 1:
-                        command = "1-L"
-                    case 2:
-                        command = "2-C"
-                    case 3:
-                        lanes := []string{"L", "R"}
-                        types := []string{"1", "2"}
-                        command = fmt.Sprintf("%s-%s", types[rand.Intn(len(types))], lanes[rand.Intn(len(lanes))])
-                    }
-                    bot.inputCh <- command
-                }
-                room.mu.Unlock()
-            }
-        }
-    }()
-=======
 				room.mu.Lock()
 				if bot.mana >= 5 {
 					var command string
@@ -668,9 +585,8 @@ func startBotGame(p1 *Client, level int) {
 			}
 		}
 	}()
->>>>>>> Stashed changes
 
-    go gameLoop(room)
+	go gameLoop(room)
 }
 
 // --- Game Loop and Core Mechanics ---
@@ -971,56 +887,15 @@ func handleReplayResponse(room *Room, client *Client, cmd string) bool {
 // --- Game Action Processors ---
 
 func processCommand(room *Room, player int, cmd string) {
-<<<<<<< Updated upstream
-    cmd = strings.ToUpper(strings.TrimSpace(cmd))
-    var troopType int
-    var lane string
-=======
 	cmd = strings.ToUpper(strings.TrimSpace(cmd))
 	var troopType string
 	var lane string
->>>>>>> Stashed changes
 
-    parts := strings.Split(cmd, "-")
-    if len(parts) != 2 {
-        return
-    }
+	parts := strings.Split(cmd, "-")
+	if len(parts) != 2 {
+		return
+	}
 
-<<<<<<< Updated upstream
-    troopTypeStr := parts[0]
-    lane = parts[1]
-
-    if troopTypeStr == "1" {
-        troopType = 1
-    } else if troopTypeStr == "2" {
-        troopType = 2
-    } else {
-        return
-    }
-
-    if lane != "L" && lane != "R" {
-        if room.clients[player-1].conn != nil {
-            room.clients[player-1].conn.Write([]byte("Invalid lane! Use L or R.\n"))
-        }
-        return
-    }
-
-
-    var c *Client
-    if player == 1 {
-        c = room.clients[0]
-    } else {
-        c = room.clients[1]
-    }
-	if( troopType == 1){
-		if c.mana > 5 {
-			c.mana -= 5
-		} else {
-			if c.conn != nil {
-				c.conn.Write([]byte("Not enough mana (need 5)!\n"))
-			}
-			return
-=======
 	troopType = parts[0]
 	lane = parts[1]
 
@@ -1036,19 +911,9 @@ func processCommand(room *Room, player int, cmd string) {
 	if lane != "L" && lane != "C" && lane != "R" {
 		if room.clients[player-1].conn != nil {
 			room.clients[player-1].conn.Write([]byte("Invalid lane! Use L, C, or R.\n"))
->>>>>>> Stashed changes
 		}
+		return
 	}
-<<<<<<< Updated upstream
-	if(troopType == 2){
-		if (c.mana > 15) {
-			c.mana -= 15
-		} else {
-			if c.conn != nil {
-				c.conn.Write([]byte("Not enough mana (need 15)!\n"))
-			}
-			return	
-=======
 
 	var c *Client
 	if player == 1 {
@@ -1062,37 +927,9 @@ func processCommand(room *Room, player int, cmd string) {
 	if c.mana < requiredMana {
 		if c.conn != nil {
 			c.conn.Write([]byte(fmt.Sprintf("Not enough mana (need %d)!\n", requiredMana)))
->>>>>>> Stashed changes
 		}
+		return
 	}
-<<<<<<< Updated upstream
-    
-
-    // Khởi tạo stats cho troop dựa trên type
-    newTroop := &Troop{
-        player:    player,
-        troopType: troopType,
-        lane:      lane,
-        position:  4,
-        age:       0,
-        alive:     true,
-    }
-    if troopType == 1 {
-        newTroop.hp = 3
-        newTroop.attack = 3
-        newTroop.def = 1
-    } else { // troopType == 2
-        newTroop.hp = 10
-        newTroop.attack = 4
-        newTroop.def = 1
-    }
-    room.troops = append(room.troops, newTroop)
-
-    if c.conn != nil {
-        c.conn.Write([]byte(fmt.Sprintf("Deployed troop type %d to %s lane (HP: %d, ATK: %d, DEF: %d)\n", 
-            troopType, lane, newTroop.hp, newTroop.attack, newTroop.def)))
-    }
-=======
 	c.mana -= requiredMana
 
 	// Create troop with level-scaled stats
@@ -1113,7 +950,6 @@ func processCommand(room *Room, player int, cmd string) {
 	if c.conn != nil {
 		c.conn.Write([]byte(fmt.Sprintf("Deployed %s to %s lane\n", getTroopName(troopType), lane)))
 	}
->>>>>>> Stashed changes
 }
 
 // getTroopName returns the full name of a troop
@@ -1139,30 +975,25 @@ func findEnemyTroopAt(room *Room, troop *Troop, pos int) *Troop {
 }
 
 func updateTroops(room *Room) {
-    var newTroops []*Troop
+	var newTroops []*Troop
 
-    for _, t := range room.troops {
-        if !t.alive {
-            continue
-        }
-        t.age++
+	for _, t := range room.troops {
+		if !t.alive {
+			continue
+		}
+		t.age++
 
-        // Log trạng thái troop trước khi xử lý
-        fmt.Printf("Troop %d (Type %d, Lane %s, Pos %d): HP=%d, Age=%d\n", 
-            t.player, t.troopType, t.lane, t.position, t.hp, t.age)
+		if t.age%2 != 0 {
+			newTroops = append(newTroops, t)
+			continue
+		}
 
-        if t.age%2 != 0 {
-            newTroops = append(newTroops, t)
-            continue
-        }
+		nextPos := t.position - 1
+		if nextPos < 0 {
+			newTroops = append(newTroops, t)
+			continue
+		}
 
-<<<<<<< Updated upstream
-        nextPos := t.position - 1
-        if nextPos < 0 {
-            newTroops = append(newTroops, t)
-            continue
-        }
-=======
 		// Calculate enemy position (mirrored)
 		enemyPos := 4 - t.position
 		enemy := findEnemyTroopAt(room, t, enemyPos)
@@ -1184,123 +1015,20 @@ func updateTroops(room *Room) {
 			newTroops = append(newTroops, t)
 			continue
 		}
->>>>>>> Stashed changes
 
-        enemy := findEnemyTroopAt(room, t, 4-t.position)
-        if enemy != nil {
-            // Tính sát thương, đảm bảo không âm
-            damageToEnemy := t.attack - enemy.def
-            if damageToEnemy < 0 {
-                damageToEnemy = 0
-            }
-            damageToTroop := enemy.attack - t.def
-            if damageToTroop < 0 {
-                damageToTroop = 0
-            }
-            enemy.hp = enemy.hp - damageToEnemy
-            t.hp = t.hp - damageToTroop
+		t.position = nextPos
+		newTroops = append(newTroops, t)
+	}
 
-            // Log sát thương và HP sau khi đánh
-            fmt.Printf("Combat: Troop P%d (Type %d, HP=%d) vs Enemy P%d (Type %d, HP=%d)\n",
-                t.player, t.troopType, t.hp, enemy.player, enemy.troopType, enemy.hp)
-
-            // Kiểm tra xem troop nào chết
-            if enemy.hp <= 0 {
-                enemy.alive = false
-                fmt.Printf("Enemy P%d (Type %d) died\n", enemy.player, enemy.troopType)
-            }
-            if t.hp <= 0 {
-                t.alive = false
-                fmt.Printf("Troop P%d (Type %d) died\n", t.player, t.troopType)
-            }
-            // Nếu troop còn sống, thêm vào newTroops
-            if t.alive {
-                newTroops = append(newTroops, t)
-            }
-            continue
-        }
-
-        t.position = nextPos
-        newTroops = append(newTroops, t)
-    }
-
-    // Lọc các troop còn sống
-    var aliveTroops []*Troop
-    for _, t := range newTroops {
-        if t.alive {
-            aliveTroops = append(aliveTroops, t)
-        }
-    }
-    room.troops = aliveTroops
-
-    // Log danh sách troop sau khi cập nhật
-    fmt.Printf("Updated troops in room %d: %d troops alive\n", room.id, len(aliveTroops))
-    for _, t := range room.troops {
-        fmt.Printf("Survivor: P%d, Type %d, Lane %s, Pos %d, HP %d\n", 
-            t.player, t.troopType, t.lane, t.position, t.hp)
-    }
+	var aliveTroops []*Troop
+	for _, t := range newTroops {
+		if t.alive {
+			aliveTroops = append(aliveTroops, t)
+		}
+	}
+	room.troops = aliveTroops
 }
 
-<<<<<<< Updated upstream
-func applyTowerDamage(room *Room) {
-    // Kiểm tra và hồi HP cho tower nếu không bị tấn công
-    for player := 1; player <= 2; player++ {
-        for _, lane := range []string{"L", "C", "R"} {
-            troopInRange := false
-            for _, t := range room.troops {
-                if t.alive && t.player != player && t.position == 0 && t.lane == lane {
-                    troopInRange = true
-                    break
-                }
-            }
-            if !troopInRange {
-                // Nếu không có troop địch ở vị trí 0, kiểm tra thời gian kể từ lần bị tấn công cuối
-                lastAttacked := room.towerLastAttacked[player][lane]
-                if time.Since(lastAttacked) >= time.Second {
-                    // Hồi 1 HP mỗi giây nếu không bị tấn công
-                    if room.towerHP[player][lane] < 100 {
-                        room.towerHP[player][lane] += 2
-                    }
-                }
-            }
-        }
-    }
-
-    for _, t := range room.troops {
-        if !t.alive || t.position != 0 {
-            continue
-        }
-
-        enemyPlayer := 3 - t.player
-        damage := t.attack  // Sử dụng attack của troop thay vì giá trị cố định
-
-        room.towerHP[enemyPlayer][t.lane] -= damage
-        if room.towerHP[enemyPlayer][t.lane] < 0 {
-            room.towerHP[enemyPlayer][t.lane] = 0
-        }
-        // Cập nhật thời gian tower bị tấn công
-        room.towerLastAttacked[enemyPlayer][t.lane] = time.Now()
-
-        // Enhanced tower destruction logic
-        if t.lane == "L" && room.towerHP[enemyPlayer]["L"] <= 0 {
-            if room.towerHP[enemyPlayer]["R"] <= 0 {
-                t.lane = "C"
-                t.position = 4
-            } else {
-                t.lane = "R"
-                t.position = 4
-            }
-        } else if t.lane == "R" && room.towerHP[enemyPlayer]["R"] <= 0 {
-            if room.towerHP[enemyPlayer]["L"] <= 0 {
-                t.lane = "C"
-                t.position = 4
-            } else {
-                t.lane = "L"
-                t.position = 4
-            }
-        }
-    }
-=======
 // applyCombat handles troop-tower interactions and special abilities
 func applyCombat(room *Room) {
 	for _, t := range room.troops {
@@ -1381,57 +1109,44 @@ func applyCombat(room *Room) {
 			}
 		}
 	}
->>>>>>> Stashed changes
 }
 
 // --- Map Rendering ---
 
 func renderMap(room *Room) string {
-    lanes := map[string][]string{
-        "L": {" ", " ", " ", " ", " "},
-        "C": {" ", " ", " ", " ", " "},
-        "R": {" ", " ", " ", " ", " "},
-    }
+	lanes := map[string][]string{
+		"L": {" ", " ", " ", " ", " "},
+		"C": {" ", " ", " ", " ", " "},
+		"R": {" ", " ", " ", " ", " "},
+	}
 
-    for _, t := range room.troops {
-        if !t.alive || t.position < 0 || t.position > 4 {
-            continue
-        }
+	for _, t := range room.troops {
+		if !t.alive || t.position < 0 || t.position > 4 {
+			continue
+		}
 
-<<<<<<< Updated upstream
-        var typeChar string
-        if t.troopType == 1 {
-            typeChar = "A"
-        } else {
-            typeChar = "B"
-        }
-
-        // Hiển thị HP của troop cùng với ký hiệu
-        symbol := fmt.Sprintf("%s%d(%d)", typeChar, t.player, t.hp)
-=======
 		symbol := fmt.Sprintf("%s%d", t.troopType, t.player)
->>>>>>> Stashed changes
 
-        if t.player == 2 {
-            lanes[t.lane][t.position] = symbol
-        } else {
-            lanes[t.lane][4-t.position] = symbol
-        }
-    }
+		if t.player == 2 {
+			lanes[t.lane][t.position] = symbol
+		} else {
+			lanes[t.lane][4-t.position] = symbol
+		}
+	}
 
-    formatHP := func(hp int) string {
-        if hp < 5 {
-            return "X"
-        }
-        return fmt.Sprintf("%d", hp)
-    }
+	formatHP := func(hp int) string {
+		if hp < 5 {
+			return "X"
+		}
+		return fmt.Sprintf("%d", hp)
+	}
 
-    p1HP := room.towerHP[1]
-    p2HP := room.towerHP[2]
+	p1HP := room.towerHP[1]
+	p2HP := room.towerHP[2]
 
-    lineSep := "                          --- --- --- --- ---"
+	lineSep := "                          --- --- --- --- ---"
 
-    mapStr := fmt.Sprintf(`+---------------------- TEXT CLASH ROYALE MAP ----------------------+
+	mapStr := fmt.Sprintf(`+---------------------- TEXT CLASH ROYALE MAP ----------------------+
 
 [P1 TowerL - %s]  ===>  | %s | %s | %s | %s | %s |  <===  [P2 TowerL - %s]
 %s
@@ -1440,12 +1155,12 @@ func renderMap(room *Room) string {
 [P1 TowerR - %s]  ===>  | %s | %s | %s | %s | %s |  <===  [P2 TowerR - %s]
 
 +------------------------------------------------------------------+`,
-        formatHP(p1HP["L"]), lanes["L"][0], lanes["L"][1], lanes["L"][2], lanes["L"][3], lanes["L"][4], formatHP(p2HP["L"]),
-        lineSep,
-        formatHP(p1HP["C"]), lanes["C"][0], lanes["C"][1], lanes["C"][2], lanes["C"][3], lanes["C"][4], formatHP(p2HP["C"]),
-        lineSep,
-        formatHP(p1HP["R"]), lanes["R"][0], lanes["R"][1], lanes["R"][2], lanes["R"][3], lanes["R"][4], formatHP(p2HP["R"]),
-    )
+		formatHP(p1HP["L"]), lanes["L"][0], lanes["L"][1], lanes["L"][2], lanes["L"][3], lanes["L"][4], formatHP(p2HP["L"]),
+		lineSep,
+		formatHP(p1HP["C"]), lanes["C"][0], lanes["C"][1], lanes["C"][2], lanes["C"][3], lanes["C"][4], formatHP(p2HP["C"]),
+		lineSep,
+		formatHP(p1HP["R"]), lanes["R"][0], lanes["R"][1], lanes["R"][2], lanes["R"][3], lanes["R"][4], formatHP(p2HP["R"]),
+	)
 
-    return mapStr
+	return mapStr
 }

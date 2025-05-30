@@ -32,18 +32,33 @@ type Client struct {
 // Troop represents a unit deployed on the map
 type Troop struct {
 	player    int    // Player ID (1 or 2)
-	troopType int    // Type of troop (e.g., 1 or 2)
+	troopType string // Type of troop (P, B, R, K, I, Q)
 	lane      string // "L", "C", or "R"
 	position  int    // Current position on the lane (0-4)
 	age       int    // How many ticks the troop has been alive
 	alive     bool   // Is the troop still active?
+<<<<<<< Updated upstream
 	hp        int    // Current hit points
     attack    int    // Attack damage
     def       int    // Defense value
+=======
+	hp        int    // Current HP
+	atk       int    // Attack power
+	def       int    // Defense
+}
+
+// Tower represents a defensive structure
+type Tower struct {
+	hp   int
+	atk  int
+	def  int
+	crit float64
+>>>>>>> Stashed changes
 }
 
 // Room represents a game session between two clients (or client and bot)
 type Room struct {
+<<<<<<< Updated upstream
     id              int
     clients         [2]*Client
     troops          []*Troop
@@ -51,6 +66,16 @@ type Room struct {
     towerLastAttacked map[int]map[string]time.Time // Thời gian tower bị tấn công lần cuối
     mu              sync.Mutex
     doneChan        chan struct{}
+=======
+	id       int
+	clients  [2]*Client                // Player 1 and Player 2 (or Bot)
+	troops   []*Troop                  // All active troops in the room
+	towerHP  map[int]map[string]int    // Tower HP for display
+	tower    map[int]map[string]*Tower // Tower stats
+	mu       sync.Mutex                // Mutex to protect room data
+	doneChan chan struct{}             // Channel to signal game over
+	started  time.Time                 // Game start time
+>>>>>>> Stashed changes
 }
 
 // PlayerData stores persistent player information for saving/loading
@@ -72,6 +97,33 @@ var (
 	playerDataFile = "players.json"           // File to store player data
 	onlineUsers    = make(map[string]bool)    // Map to track currently logged-in usernames
 	onlineUsersMu  sync.Mutex                 // Mutex to protect onlineUsers map
+
+	// Troop types and their base stats
+	troopTypes = map[string]struct {
+		hp   int
+		atk  int
+		def  int
+		mana int
+		spec string
+	}{
+		"P": {50, 150, 100, 3, ""},  // Pawn
+		"B": {100, 200, 150, 4, ""}, // Bishop
+		"R": {250, 200, 200, 5, ""}, // Rook
+		"K": {200, 300, 150, 5, ""}, // Knight
+		"I": {500, 400, 300, 6, ""}, // Prince
+		"Q": {1, 0, 0, 5, "heal"},   // Queen (special: heal tower)
+	}
+
+	// Tower base stats
+	towerBaseStats = map[string]struct {
+		hp   int
+		atk  int
+		def  int
+		crit float64
+	}{
+		"King":  {2000, 500, 300, 10},
+		"Guard": {1000, 300, 100, 5},
+	}
 )
 
 func main() {
@@ -133,11 +185,17 @@ func savePlayerData(player PlayerData) error {
 
 // --- Game Logic Helpers ---
 
+// Fixed applyLevelScaling function
+func (c *Client) applyLevelScaling(base int) int {
+	return int(float64(base) * (1.0 + 0.1*float64(c.level)))
+}
+
 // resetRoom resets the game state for a given room
 func resetRoom(room *Room) {
     room.mu.Lock()
     defer room.mu.Unlock()
 
+<<<<<<< Updated upstream
     room.towerHP[1] = map[string]int{"L": 100, "C": 100, "R": 100}
     room.towerHP[2] = map[string]int{"L": 100, "C": 100, "R": 100}
     room.troops = []*Troop{}
@@ -145,6 +203,58 @@ func resetRoom(room *Room) {
     room.towerLastAttacked = make(map[int]map[string]time.Time)
     room.towerLastAttacked[1] = map[string]time.Time{"L": time.Now(), "C": time.Now(), "R": time.Now()}
     room.towerLastAttacked[2] = map[string]time.Time{"L": time.Now(), "C": time.Now(), "R": time.Now()}
+=======
+	// Initialize towers
+	room.tower = make(map[int]map[string]*Tower)
+	room.towerHP = make(map[int]map[string]int)
+
+	// Player 1 towers
+	room.tower[1] = make(map[string]*Tower)
+	room.towerHP[1] = make(map[string]int)
+
+	// Player 2 towers
+	room.tower[2] = make(map[string]*Tower)
+	room.towerHP[2] = make(map[string]int)
+
+	// Set tower stats with level scaling
+	for playerID, client := range room.clients {
+		if client == nil {
+			continue
+		}
+		playerNum := playerID + 1
+
+		// King Tower (Center)
+		kingStats := towerBaseStats["King"]
+		room.tower[playerNum]["C"] = &Tower{
+			hp:   client.applyLevelScaling(kingStats.hp),
+			atk:  client.applyLevelScaling(kingStats.atk),
+			def:  client.applyLevelScaling(kingStats.def),
+			crit: kingStats.crit,
+		}
+		room.towerHP[playerNum]["C"] = room.tower[playerNum]["C"].hp
+
+		// Guard Towers (Left and Right)
+		guardStats := towerBaseStats["Guard"]
+		room.tower[playerNum]["L"] = &Tower{
+			hp:   client.applyLevelScaling(guardStats.hp),
+			atk:  client.applyLevelScaling(guardStats.atk),
+			def:  client.applyLevelScaling(guardStats.def),
+			crit: guardStats.crit,
+		}
+		room.towerHP[playerNum]["L"] = room.tower[playerNum]["L"].hp
+
+		room.tower[playerNum]["R"] = &Tower{
+			hp:   client.applyLevelScaling(guardStats.hp),
+			atk:  client.applyLevelScaling(guardStats.atk),
+			def:  client.applyLevelScaling(guardStats.def),
+			crit: guardStats.crit,
+		}
+		room.towerHP[playerNum]["R"] = room.tower[playerNum]["R"].hp
+	}
+
+	room.troops = []*Troop{}
+	room.started = time.Now()
+>>>>>>> Stashed changes
 
     for _, client := range room.clients {
         if client != nil {
@@ -191,6 +301,22 @@ func (c *Client) addExp(exp int) {
 	if err := savePlayerData(playerData); err != nil {
 		fmt.Println("Error saving player data for", c.username, ":", err)
 	}
+}
+
+// calculateDamage computes damage using CRIT chance and defense
+func calculateDamage(atk int, critChance float64, def int) int {
+	// Check for critical hit
+	isCrit := rand.Float64()*100 < critChance
+	baseDamage := atk
+	if isCrit {
+		baseDamage = int(float64(atk) * 1.2)
+	}
+
+	damage := baseDamage - def
+	if damage < 0 {
+		return 0
+	}
+	return damage
 }
 
 // --- Connection and Authentication Handling ---
@@ -396,6 +522,7 @@ func matchPlayers() {
         roomID := roomCount
         globalMu.Unlock()
 
+<<<<<<< Updated upstream
         room := &Room{
             id:       roomID,
             clients:  [2]*Client{p1, p2},
@@ -411,6 +538,20 @@ func matchPlayers() {
         p1.roomID = roomID
         p2.roomID = roomID
         rooms[roomID] = room
+=======
+		room := &Room{
+			id:       roomID,
+			clients:  [2]*Client{p1, p2},
+			troops:   []*Troop{},
+			tower:    make(map[int]map[string]*Tower),
+			towerHP:  make(map[int]map[string]int),
+			doneChan: make(chan struct{}),
+		}
+		p1.roomID = roomID
+		p2.roomID = roomID
+		rooms[roomID] = room
+		resetRoom(room)
+>>>>>>> Stashed changes
 
         fmt.Printf("Room %d created for %s (%s) vs %s (%s)\n", roomID, p1.username, p1.clientKey, p2.username, p2.clientKey)
 
@@ -437,6 +578,7 @@ func startBotGame(p1 *Client, level int) {
         level:     1,
     }
 
+<<<<<<< Updated upstream
     room := &Room{
         id:       roomID,
         clients:  [2]*Client{p1, bot},
@@ -452,6 +594,20 @@ func startBotGame(p1 *Client, level int) {
     p1.roomID = roomID
     bot.roomID = roomID
     rooms[roomID] = room
+=======
+	room := &Room{
+		id:       roomID,
+		clients:  [2]*Client{p1, bot},
+		troops:   []*Troop{},
+		tower:    make(map[int]map[string]*Tower),
+		towerHP:  make(map[int]map[string]int),
+		doneChan: make(chan struct{}),
+	}
+	p1.roomID = roomID
+	bot.roomID = roomID
+	rooms[roomID] = room
+	resetRoom(room)
+>>>>>>> Stashed changes
 
     fmt.Printf("Room %d created for %s (%s) vs %s\n", roomID, p1.username, p1.clientKey, bot.username)
 
@@ -472,6 +628,7 @@ func startBotGame(p1 *Client, level int) {
                 }
                 time.Sleep(delay)
 
+<<<<<<< Updated upstream
                 room.mu.Lock()
                 if bot.mana >= 5 {
                     var command string
@@ -491,6 +648,27 @@ func startBotGame(p1 *Client, level int) {
             }
         }
     }()
+=======
+				room.mu.Lock()
+				if bot.mana >= 5 {
+					var command string
+					switch level {
+					case 1:
+						command = "P-L"
+					case 2:
+						command = "B-C"
+					case 3:
+						troops := []string{"P", "B", "R", "K", "I"}
+						lanes := []string{"L", "R"}
+						command = fmt.Sprintf("%s-%s", troops[rand.Intn(len(troops))], lanes[rand.Intn(len(lanes))])
+					}
+					bot.inputCh <- command
+				}
+				room.mu.Unlock()
+			}
+		}
+	}()
+>>>>>>> Stashed changes
 
     go gameLoop(room)
 }
@@ -522,14 +700,16 @@ func gameLoop(room *Room) {
 	p2 := room.clients[1]
 
 	startMsg := `Game started! Commands:
-    1-L: Deploy type 1 to Left lane
-    1-R: Deploy type 1 to Right lane
-    2-L: Deploy type 2 to Left lane
-    2-R: Deploy type 2 to Right lane
-    Type exactly as shown (e.g. "2-R")
+    P-L: Deploy Pawn to Left lane
+    B-C: Deploy Bishop to Center lane
+    R-R: Deploy Rook to Right lane
+    K-L: Deploy Knight to Left lane
+    I-R: Deploy Prince to Right lane
+    Q-C: Deploy Queen to Center lane
 
     Strategy:
-    - Destroy both Left and Right Towers before attacking the King Tower`
+    - Destroy both Left and Right Towers before attacking the King Tower
+    - Queen heals friendly towers when she reaches them`
 
 	if p1.conn != nil {
 		p1.conn.Write([]byte(fmt.Sprintf("%s\n", startMsg)))
@@ -580,20 +760,28 @@ loop:
 			}
 
 			updateTroops(room)
-			applyTowerDamage(room)
+			applyCombat(room)
 
-			// Only check king tower for game end
-			if room.towerHP[1]["C"] <= 0 {
+			// Check king tower for game end
+			if room.tower[1]["C"].hp <= 0 {
 				gameOver = true
 				winner = 2
 				reason = "king_tower"
 				room.mu.Unlock()
 				break loop
 			}
-			if room.towerHP[2]["C"] <= 0 {
+			if room.tower[2]["C"].hp <= 0 {
 				gameOver = true
 				winner = 1
 				reason = "king_tower"
+				room.mu.Unlock()
+				break loop
+			}
+
+			// Check game timer (3 minutes)
+			if time.Since(room.started) >= 3*time.Minute {
+				gameOver = true
+				reason = "time_up"
 				room.mu.Unlock()
 				break loop
 			}
@@ -612,46 +800,52 @@ loop:
 	}
 
 	if gameOver {
-		switch reason {
-		case "king_tower":
-			for _, c := range room.clients {
-				if c.conn != nil {
-					c.conn.Write([]byte(fmt.Sprintf("\nGAME OVER! Player %d wins by destroying the King Tower!\n", winner)))
+		// Handle time_up win condition
+		if reason == "time_up" {
+			p1TowersDestroyed := 0
+			p2TowersDestroyed := 0
+
+			// Count destroyed towers (both guard and king)
+			for _, tower := range room.tower[1] {
+				if tower.hp <= 0 {
+					p2TowersDestroyed++ // Player 2 destroyed Player 1's tower
+				}
+			}
+			for _, tower := range room.tower[2] {
+				if tower.hp <= 0 {
+					p1TowersDestroyed++ // Player 1 destroyed Player 2's tower
 				}
 			}
 
-			if winner == 1 && p1.clientKey != "Bot" {
-				p1.addExp(30)
-				if p1.conn != nil {
-					p1.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
-						p1.exp, requiredExpForLevel(p1.level))))
-				}
-			} else if winner == 2 && p2.clientKey != "Bot" {
-				p2.addExp(30)
-				if p2.conn != nil {
-					p2.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
-						p2.exp, requiredExpForLevel(p2.level))))
-				}
-			}
-
-		case "disconnect":
-			if winner == 1 && p1.clientKey != "Bot" {
-				p1.conn.Write([]byte("\nGAME OVER! You win! Opponent disconnected.\n"))
-				p1.addExp(30)
-				if p1.conn != nil {
-					p1.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
-						p1.exp, requiredExpForLevel(p1.level))))
-				}
-			} else if winner == 2 && p2.clientKey != "Bot" {
-				p2.conn.Write([]byte("\nGAME OVER! You win! Opponent disconnected.\n"))
-				p2.addExp(30)
-				if p2.conn != nil {
-					p2.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
-						p2.exp, requiredExpForLevel(p2.level))))
-				}
+			if p1TowersDestroyed > p2TowersDestroyed {
+				winner = 1
+			} else if p2TowersDestroyed > p1TowersDestroyed {
+				winner = 2
+			} else {
+				winner = 0 // Draw
 			}
 		}
 
+		// Send game over message
+		for _, c := range room.clients {
+			if c.conn == nil {
+				continue
+			}
+
+			switch {
+			case winner == 0:
+				c.conn.Write([]byte("\nGAME OVER! It's a draw!\n"))
+			case c == room.clients[winner-1]:
+				c.conn.Write([]byte(fmt.Sprintf("\nGAME OVER! You win! (%s)\n", reason)))
+				c.addExp(30)
+				c.conn.Write([]byte(fmt.Sprintf("You gained 30 EXP! Total EXP: %d/%d\n",
+					c.exp, requiredExpForLevel(c.level))))
+			default:
+				c.conn.Write([]byte(fmt.Sprintf("\nGAME OVER! Player %d wins! (%s)\n", winner, reason)))
+			}
+		}
+
+		// Handle replay
 		for _, client := range room.clients {
 			if client.clientKey == "Bot" {
 				continue
@@ -777,15 +971,22 @@ func handleReplayResponse(room *Room, client *Client, cmd string) bool {
 // --- Game Action Processors ---
 
 func processCommand(room *Room, player int, cmd string) {
+<<<<<<< Updated upstream
     cmd = strings.ToUpper(strings.TrimSpace(cmd))
     var troopType int
     var lane string
+=======
+	cmd = strings.ToUpper(strings.TrimSpace(cmd))
+	var troopType string
+	var lane string
+>>>>>>> Stashed changes
 
     parts := strings.Split(cmd, "-")
     if len(parts) != 2 {
         return
     }
 
+<<<<<<< Updated upstream
     troopTypeStr := parts[0]
     lane = parts[1]
 
@@ -819,8 +1020,26 @@ func processCommand(room *Room, player int, cmd string) {
 				c.conn.Write([]byte("Not enough mana (need 5)!\n"))
 			}
 			return
+=======
+	troopType = parts[0]
+	lane = parts[1]
+
+	// Validate troop type
+	if _, valid := troopTypes[troopType]; !valid {
+		if room.clients[player-1].conn != nil {
+			room.clients[player-1].conn.Write([]byte("Invalid troop type! Use P, B, R, K, I, or Q.\n"))
+		}
+		return
+	}
+
+	// Validate lane
+	if lane != "L" && lane != "C" && lane != "R" {
+		if room.clients[player-1].conn != nil {
+			room.clients[player-1].conn.Write([]byte("Invalid lane! Use L, C, or R.\n"))
+>>>>>>> Stashed changes
 		}
 	}
+<<<<<<< Updated upstream
 	if(troopType == 2){
 		if (c.mana > 15) {
 			c.mana -= 15
@@ -829,8 +1048,24 @@ func processCommand(room *Room, player int, cmd string) {
 				c.conn.Write([]byte("Not enough mana (need 15)!\n"))
 			}
 			return	
+=======
+
+	var c *Client
+	if player == 1 {
+		c = room.clients[0]
+	} else {
+		c = room.clients[1]
+	}
+
+	// Check mana cost
+	requiredMana := troopTypes[troopType].mana
+	if c.mana < requiredMana {
+		if c.conn != nil {
+			c.conn.Write([]byte(fmt.Sprintf("Not enough mana (need %d)!\n", requiredMana)))
+>>>>>>> Stashed changes
 		}
 	}
+<<<<<<< Updated upstream
     
 
     // Khởi tạo stats cho troop dựa trên type
@@ -857,6 +1092,41 @@ func processCommand(room *Room, player int, cmd string) {
         c.conn.Write([]byte(fmt.Sprintf("Deployed troop type %d to %s lane (HP: %d, ATK: %d, DEF: %d)\n", 
             troopType, lane, newTroop.hp, newTroop.attack, newTroop.def)))
     }
+=======
+	c.mana -= requiredMana
+
+	// Create troop with level-scaled stats
+	base := troopTypes[troopType]
+	newTroop := &Troop{
+		player:    player,
+		troopType: troopType,
+		lane:      lane,
+		position:  4,
+		age:       0,
+		alive:     true,
+		hp:        c.applyLevelScaling(base.hp),
+		atk:       c.applyLevelScaling(base.atk),
+		def:       c.applyLevelScaling(base.def),
+	}
+	room.troops = append(room.troops, newTroop)
+
+	if c.conn != nil {
+		c.conn.Write([]byte(fmt.Sprintf("Deployed %s to %s lane\n", getTroopName(troopType), lane)))
+	}
+>>>>>>> Stashed changes
+}
+
+// getTroopName returns the full name of a troop
+func getTroopName(troopType string) string {
+	names := map[string]string{
+		"P": "Pawn",
+		"B": "Bishop",
+		"R": "Rook",
+		"K": "Knight",
+		"I": "Prince",
+		"Q": "Queen",
+	}
+	return names[troopType]
 }
 
 func findEnemyTroopAt(room *Room, troop *Troop, pos int) *Troop {
@@ -886,11 +1156,35 @@ func updateTroops(room *Room) {
             continue
         }
 
+<<<<<<< Updated upstream
         nextPos := t.position - 1
         if nextPos < 0 {
             newTroops = append(newTroops, t)
             continue
         }
+=======
+		// Calculate enemy position (mirrored)
+		enemyPos := 4 - t.position
+		enemy := findEnemyTroopAt(room, t, enemyPos)
+		if enemy != nil {
+			// Troop vs troop combat
+			troopDamage := calculateDamage(t.atk, 0, enemy.def)
+			enemy.hp -= troopDamage
+
+			enemyDamage := calculateDamage(enemy.atk, 0, t.def)
+			t.hp -= enemyDamage
+
+			if t.hp <= 0 {
+				t.alive = false
+			}
+			if enemy.hp <= 0 {
+				enemy.alive = false
+			}
+
+			newTroops = append(newTroops, t)
+			continue
+		}
+>>>>>>> Stashed changes
 
         enemy := findEnemyTroopAt(room, t, 4-t.position)
         if enemy != nil {
@@ -947,6 +1241,7 @@ func updateTroops(room *Room) {
     }
 }
 
+<<<<<<< Updated upstream
 func applyTowerDamage(room *Room) {
     // Kiểm tra và hồi HP cho tower nếu không bị tấn công
     for player := 1; player <= 2; player++ {
@@ -1005,6 +1300,88 @@ func applyTowerDamage(room *Room) {
             }
         }
     }
+=======
+// applyCombat handles troop-tower interactions and special abilities
+func applyCombat(room *Room) {
+	for _, t := range room.troops {
+		if !t.alive || t.position != 0 {
+			continue
+		}
+
+		enemyPlayer := 3 - t.player
+		tower := room.tower[enemyPlayer][t.lane]
+
+		// Handle Queen special ability (heals friendly tower)
+		if t.troopType == "Q" {
+			// Find lowest HP friendly tower
+			friendlyPlayer := t.player
+			lowestHP := 1000000
+			var healLane string
+
+			for lane, tower := range room.tower[friendlyPlayer] {
+				if tower.hp > 0 && tower.hp < lowestHP {
+					lowestHP = tower.hp
+					healLane = lane
+				}
+			}
+
+			// Heal the tower
+			if healLane != "" {
+				tower := room.tower[friendlyPlayer][healLane]
+				healAmount := 300
+				tower.hp += healAmount
+				room.towerHP[friendlyPlayer][healLane] = tower.hp
+
+				// Notify players
+				for _, c := range room.clients {
+					if c.conn != nil {
+						c.conn.Write([]byte(
+							fmt.Sprintf("Queen healed Player %d's %s tower by %d HP!\n",
+								friendlyPlayer, healLane, healAmount)))
+					}
+				}
+			}
+
+			// Remove Queen after healing
+			t.alive = false
+			continue
+		}
+
+		// Normal troop attacks tower
+		troopDamage := calculateDamage(t.atk, 0, tower.def)
+		tower.hp -= troopDamage
+		room.towerHP[enemyPlayer][t.lane] = tower.hp
+
+		// Tower attacks troop
+		towerDamage := calculateDamage(tower.atk, tower.crit, t.def)
+		t.hp -= towerDamage
+
+		if t.hp <= 0 {
+			t.alive = false
+		}
+
+		// Enhanced tower destruction logic
+		if tower.hp <= 0 {
+			// Tower destroyed - check if it's a guard tower
+			if t.lane == "L" || t.lane == "R" {
+				// Check if both guard towers are destroyed
+				if room.tower[enemyPlayer]["L"].hp <= 0 && room.tower[enemyPlayer]["R"].hp <= 0 {
+					// Both side towers destroyed - move to center
+					t.lane = "C"
+					t.position = 4
+				} else if room.tower[enemyPlayer]["L"].hp <= 0 {
+					// Only left tower destroyed - move to right tower
+					t.lane = "R"
+					t.position = 4
+				} else if room.tower[enemyPlayer]["R"].hp <= 0 {
+					// Only right tower destroyed - move to left tower
+					t.lane = "L"
+					t.position = 4
+				}
+			}
+		}
+	}
+>>>>>>> Stashed changes
 }
 
 // --- Map Rendering ---
@@ -1021,6 +1398,7 @@ func renderMap(room *Room) string {
             continue
         }
 
+<<<<<<< Updated upstream
         var typeChar string
         if t.troopType == 1 {
             typeChar = "A"
@@ -1030,6 +1408,9 @@ func renderMap(room *Room) string {
 
         // Hiển thị HP của troop cùng với ký hiệu
         symbol := fmt.Sprintf("%s%d(%d)", typeChar, t.player, t.hp)
+=======
+		symbol := fmt.Sprintf("%s%d", t.troopType, t.player)
+>>>>>>> Stashed changes
 
         if t.player == 2 {
             lanes[t.lane][t.position] = symbol
